@@ -1,10 +1,3 @@
-# ═══════════════════════════════════════════════════════════
-#        😎  VISHAL MUSIC BOT  😎
-#   GitHub : github.com/ItsMeVishal0/VishalMusic
-#   Developer : @ItsMeVishalBots | Telegram
-#   Module : /start Command & Welcome Handler
-# ═══════════════════════════════════════════════════════════
-
 import time
 import asyncio
 import random
@@ -60,6 +53,16 @@ STICKERS = [
 
 # 🔥 Sirf wo reactions jo Telegram 100% support karta hai
 REACTIONS = ["❤️", "🔥", "🥰", "😍", "😘", "👍", "👏", "🎉", "✨", "⭐️", "🌈", "🎵", "🎶", "💝", "💖", "💗", "💓", "💞", "💕", "💋"]
+
+# 🎇 Message Effect IDs - ye config.py se aayenge (private chats only, Telegram feature)
+# config.py me ye add karo:
+# EFFECT_IDS = [5104841245755180586, 5107584321108051014, 5046509860389126442, 5046589136895476101]
+def get_random_effect():
+    """config.py ke EFFECT_IDS list se random effect id deta hai, agar nahi mila to None"""
+    try:
+        return random.choice(config.EFFECT_IDS)
+    except Exception:
+        return None
 
 async def delete_message_after_delay(message: Message, delay: int):
     await asyncio.sleep(delay)
@@ -179,47 +182,11 @@ async def start_pm(client, message: Message, _):
                     text=f"{message.from_user.mention} ᴊᴜsᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ ᴛᴏ ᴄʜᴇᴄᴋ <b>ᴛʀᴀᴄᴋ ɪɴғᴏʀᴍᴀᴛɪᴏɴ</b>.\n\n<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code>\n<b>ᴜsᴇʀɴᴀᴍᴇ :</b> {username}",
                 )
     else:
-        # Airbeats.py style animation - PRIVATE CHAT ONLY
-        try:
-            # Build user mention for animation
-            user_mention = f'<a href="tg://user?id={message.from_user.id}">{message.from_user.first_name}</a>'
-            
-            # Welcome animation
-            welcome_msgs = [
-                "𝐖𝐞𝐥𝐜𝐨𝐦𝐞 𝐁𝐚𝐛𝐲 ꨄ︎ {}.. ❣️",
-                "𝐖𝐞𝐥𝐜𝐨𝐦𝐞 𝐁𝐚𝐛𝐲 ꨄ {}..... 🥳",
-                "𝐖𝐞𝐥𝐜𝐨𝐦𝐞 𝐁𝐚𝐛𝐲 ꨄ {}........ 💥",
-                "𝐖𝐞𝐥𝐜𝐨𝐦𝐞 𝐁𝐚𝐛𝐲 ꨄ {}.......... 🤩",
-                "𝐖𝐞𝐥𝐜𝐨𝐦𝐞 𝐁𝐚𝐛𝐲 ꨄ {}........... 💌",
-                "𝐖𝐞𝐥𝐜𝐨𝐦𝐞 𝐁𝐚𝐛𝐲 ꨄ {}............. 💞",
-            ]
-            
-            from pyrogram import enums
-            lol = await message.reply_text(
-                welcome_msgs[0].format(user_mention),
-                parse_mode=enums.ParseMode.HTML
-            )
-            for msg in welcome_msgs[1:]:
-                await asyncio.sleep(0.3)
-                await lol.edit_text(
-                    msg.format(user_mention),
-                    parse_mode=enums.ParseMode.HTML
-                )
-            await lol.delete()
-                
-        except Exception:
-            pass
+        # 🖼️ Hamesha config.py wali start image use karo (user profile photo nahi)
+        start_photo = random.choice(config.START_IMGS)
         
-        # 🖼️ Get user profile photo, fallback to config image
-        start_photo = None
-        try:
-            if message.from_user.photo:
-                start_photo = await app.download_media(message.from_user.photo.big_file_id)
-        except Exception:
-            pass
-        
-        if not start_photo:
-            start_photo = random.choice(config.START_IMGS)
+        # 🎇 Random message effect id config.py se
+        effect_id = get_random_effect()
         
         # Get buttons with colored support
         out = private_panel(_)
@@ -230,24 +197,44 @@ async def start_pm(client, message: Message, _):
         caption = _["start_2"].format(user_mention, bot_mention)
         
         # Try colored buttons first via Bot API
-        result = await send_photo_colored(
-            chat_id=message.chat.id,
-            photo=start_photo,
-            caption=caption,
-            reply_markup=out
-        )
+        try:
+            result = await send_photo_colored(
+                chat_id=message.chat.id,
+                photo=start_photo,
+                caption=caption,
+                reply_markup=out,
+                message_effect_id=effect_id,
+            )
+        except TypeError:
+            # send_photo_colored ka purana version message_effect_id support nahi karta
+            result = await send_photo_colored(
+                chat_id=message.chat.id,
+                photo=start_photo,
+                caption=caption,
+                reply_markup=out,
+            )
         
         # Fallback to Pyrogram if Bot API fails
         if not result:
             from pyrogram import enums
             # Note: buttons_to_inline_markup loses colors (no style field in Pyrogram)
             # For colored buttons, user must have valid BOT_TOKEN set in config
-            await message.reply_photo(
-                photo=start_photo,
-                caption=caption,
-                parse_mode=enums.ParseMode.HTML,
-                reply_markup=buttons_to_inline_markup(out),
-            )
+            try:
+                await message.reply_photo(
+                    photo=start_photo,
+                    caption=caption,
+                    parse_mode=enums.ParseMode.HTML,
+                    reply_markup=buttons_to_inline_markup(out),
+                    message_effect_id=effect_id,
+                )
+            except TypeError:
+                # Purana Pyrogram version message_effect_id support nahi karta
+                await message.reply_photo(
+                    photo=start_photo,
+                    caption=caption,
+                    parse_mode=enums.ParseMode.HTML,
+                    reply_markup=buttons_to_inline_markup(out),
+                )
         
         # Log
         if await is_on_off(2):
@@ -285,16 +272,8 @@ async def start_gp(client, message: Message, _):
     out = start_panel(_)
     uptime = int(time.time() - _boot_)
     
-    # User profile photo or fallback image
-    start_photo = None
-    try:
-        if message.from_user and message.from_user.photo:
-            start_photo = await app.download_media(message.from_user.photo.big_file_id)
-    except Exception:
-        pass
-    
-    if not start_photo:
-        start_photo = random.choice(config.START_IMGS)
+    # 🖼️ Hamesha config.py wali start image use karo (user profile photo nahi)
+    start_photo = random.choice(config.START_IMGS)
     
     # Get buttons with Telegram native colored button support
     from VENOMMUSIC.utils.colored_buttons import buttons_to_inline_markup
@@ -354,16 +333,8 @@ async def welcome(client, message: Message):
 
                 out = start_panel(_)
                 
-                # Get user who joined's profile photo, fallback to config START_IMGS
-                welcome_photo = None
-                try:
-                    if member and member.photo:
-                        welcome_photo = await app.download_media(member.photo.big_file_id)
-                except Exception:
-                    pass
-                
-                if not welcome_photo:
-                    welcome_photo = random.choice(config.START_IMGS)
+                # 🖼️ Hamesha config.py wali start image use karo (joining user ki profile photo nahi)
+                welcome_photo = random.choice(config.START_IMGS)
                 
                 from pyrogram import enums
                 await message.reply_photo(
@@ -382,8 +353,3 @@ async def welcome(client, message: Message):
                 
         except Exception:
             pass
-
-# ═══════════════════════════════════════════════════════════
-#        😎  VISHAL MUSIC BOT  😎
-#   github.com/ItsMeVishal0/VishalMusic
-# ═══════════════════════════════════════════════════════════
