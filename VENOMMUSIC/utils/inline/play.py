@@ -1,18 +1,3 @@
-# ═══════════════════════════════════════════════════════════
-#        😎  VISHAL MUSIC BOT  😎
-#   GitHub : github.com/ItsMeVishal0/VishalMusic
-#   Developer : @ItsMeVishalBots | Telegram
-#   Module : Inline Play Buttons (ALL COLORED via Bot API 9.4)
-# ═══════════════════════════════════════════════════════════
-#
-# Every button here returns a styled_button DICT with a "style"
-# field so the Bot API 9.4 renders them in color.
-# The plain names (track_markup, stream_markup, etc.) are kept
-# for backward compatibility with existing callers, but they now
-# also return colored dicts.
-#
-# ═══════════════════════════════════════════════════════════
-
 import time
 from VENOMMUSIC.utils.formatters import time_to_seconds
 from VENOMMUSIC.utils.colored_buttons import styled_button
@@ -82,9 +67,47 @@ def autoplay_button(chat_id: int, status: bool) -> dict:
     )
 
 
+def autoplay_row(chat_id: int, status: bool, song_name: str = "") -> list:
+    """
+    Autoplay row that shows the current song name AND a direct
+    'cancel/off' option, not just a toggle.
+
+    Row layout:
+      [ 🎵 Song Name (info-only) ]                     <- only if song_name given
+      [ 🔁 Autoplay ON/OFF (toggle) ] [ ✖ Cancel ]      <- cancel only shows when ON
+    """
+    rows = []
+
+    if song_name:
+        short_name = (song_name[:28] + "…") if len(song_name) > 28 else song_name
+        rows.append([
+            styled_button(
+                f"🎵 {short_name}",
+                callback_data="GetTimer",  # info-only, harmless no-op callback
+                style="secondary",
+            )
+        ])
+
+    toggle_row = [autoplay_button(chat_id, status)]
+
+    # Explicit "cancel" button only makes sense when autoplay is currently ON
+    if status:
+        toggle_row.append(
+            styled_button(
+                "✖ ᴀᴜᴛᴏᴘʟᴀʏ ᴄᴀɴᴄᴇʟ",
+                callback_data=f"AUTOPLAY_OFF {chat_id}",
+                style="danger",
+            )
+        )
+
+    rows.append(toggle_row)
+    return rows
+
+
 # Colored aliases (kept for callers that already use the "colored_" name)
 colored_control_buttons = control_buttons
 colored_autoplay_button = autoplay_button
+colored_autoplay_row = autoplay_row
 
 
 # ═══════════════════════════════════════════════════════════
@@ -201,16 +224,16 @@ def slider_markup(_, videoid, user_id, query, query_type, channel, fplay):
 #   STREAM ("NOW PLAYING") BUTTONS  (colored)
 # ═══════════════════════════════════════════════════════════
 
-def stream_markup(_, chat_id, autoplay_status: bool = False):
-    """Now Playing keyboard — colored."""
+def stream_markup(_, chat_id, autoplay_status: bool = False, song_name: str = ""):
+    """Now Playing keyboard — colored, with song name + autoplay cancel."""
     return (
         control_buttons(_, chat_id)
-        + [[autoplay_button(chat_id, autoplay_status)]]
+        + autoplay_row(chat_id, autoplay_status, song_name)
         + [[styled_button(_["CLOSE_BUTTON"], callback_data="close", style="danger")]]
     )
 
 
-def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False):
+def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False, song_name: str = ""):
     """Now Playing keyboard with progress bar — colored (throttled)."""
     if not should_update_progress(chat_id):
         return None
@@ -226,7 +249,7 @@ def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False):
             style="primary",
         )]]
         + control_buttons(_, chat_id)
-        + [[autoplay_button(chat_id, autoplay_status)]]
+        + autoplay_row(chat_id, autoplay_status, song_name)
         + [[styled_button(_["CLOSE_BUTTON"], callback_data="close", style="danger")]]
     )
 
@@ -234,9 +257,3 @@ def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False):
 # Colored aliases (kept for callers already using the "colored_" name)
 colored_stream_markup = stream_markup
 colored_stream_markup_timer = stream_markup_timer
-
-
-# ═══════════════════════════════════════════════════════════
-#        😎  VISHAL MUSIC BOT  😎
-#   github.com/ItsMeVishal0/VishalMusic
-# ═══════════════════════════════════════════════════════════
