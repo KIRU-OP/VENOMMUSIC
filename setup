@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# --- Colors for Professional UI ---
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' P='\033[0;35m' C='\033[0;36m' W='\033[0;37m' BOLD='\033[1m' NC='\033[0m'
+TICK="${G}✔${NC}" CROSS="${R}✘${NC}" INFO="${C}➜${NC}"
+
+# --- Banner Function ---
+banner() {
+    clear
+    printf "${P}${BOLD}  ██████╗ ██╗███████╗██╗  ██╗██╗   ██╗\n"
+    printf "  ██╔══██╗██║██╔════╝██║  ██║██║   ██║\n"
+    printf "  ██████╔╝██║███████╗███████║██║   ██║\n"
+    printf "  ██╔══██╗██║╚════██║██╔══██║██║   ██║\n"
+    printf "  ██║  ██║██║███████║██║  ██║╚██████╔╝\n"
+    printf "  ╚═╝  ╚═╝╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝\n"
+    printf "          ${C}M U S I C   I N S T A L L E R${NC}\n"
+    printf "${B}  ───────────────────────────────────────────${NC}\n"
+}
+
+# --- Detection & Setup ---
+if [ -d "$PREFIX/bin" ]; then
+    SYS="TERMUX"
+    PM="pkg"
+    PYTHON_BIN="python"
+else
+    SYS="UBUNTU/NEO"
+    PM="apt"
+    PYTHON_BIN="python3"
+fi
+
+banner
+printf "${Y}${BOLD}⚡ Detected System: ${C}$SYS${NC}\n"
+printf "${Y}${BOLD}⚡ Starting Full Installation...${NC}\n\n"
+
+# 1. System Update
+printf "${INFO} Updating System... "
+if [ "$PM" == "pkg" ]; then
+    pkg update -y && pkg upgrade -y &>/dev/null
+else
+    apt update -y && apt upgrade -y &>/dev/null
+fi
+printf "${TICK} DONE\n"
+
+# 2. Core Packages Installation
+PACKAGES="ffmpeg nodejs git curl"
+if [ "$PM" == "pkg" ]; then
+    PACKAGES="$PACKAGES python"
+else
+    PACKAGES="$PACKAGES python3 python3-pip"
+fi
+
+for pkg in $PACKAGES; do
+    printf "${INFO} Installing $pkg... "
+    $PM install $pkg -y &>/dev/null
+    printf "${TICK} DONE\n"
+done
+
+# 3. Pip Dependencies (The heavy part)
+printf "${INFO} Upgrading Pip & Dependencies... \n"
+printf "${Y}   (Dhyan dein: Isme 5-10 minute lag sakte hain, Ctrl+C mat dabana)${NC}\n"
+
+# Upgrading pip first
+$PYTHON_BIN -m pip install --upgrade pip --break-system-packages &>/dev/null
+
+# Installing requirements
+if [ -f "requirements.txt" ]; then
+    $PYTHON_BIN -m pip install -r requirements.txt --break-system-packages &>/dev/null
+    printf "   ${TICK} Requirements Installed\n"
+elif [ -f "pyproject.toml" ]; then
+    $PYTHON_BIN -m pip install . --break-system-packages &>/dev/null
+    printf "   ${TICK} Project Dependencies Installed\n"
+else
+    printf "   ${R}${CROSS} No requirements file found! Skipping pip install...${NC}\n"
+fi
+
+# 4. Configuration Wizard
+banner
+printf "${C}${BOLD}󰄵 CONFIGURATION WIZARD${NC}\n"
+printf "${B}───────────────────────────────────────────${NC}\n"
+printf "${Y}Niche apni details bharein:${NC}\n"
+read -p "  API ID       : " api_id
+read -p "  API HASH     : " api_hash
+read -p "  BOT TOKEN    : " bot_token
+read -p "  OWNER ID     : " ownid
+read -p "  MONGO DB URI : " mongo_db
+read -p "  LOG GROUP ID : " logger
+read -p "  STRING SESS  : " string_session
+
+# Saving to .env
+cat <<EOF > .env
+API_ID=$api_id
+API_HASH=$api_hash
+BOT_TOKEN=$bot_token
+MONGO_DB_URI=$mongo_db
+LOGGER_ID=$logger
+STRING_SESSION=$string_session
+OWNER_ID=$ownid
+EOF
+
+banner
+printf "${G}${BOLD}🎉 RISHU MUSIC SETUP COMPLETE!${NC}\n\n"
+printf "${C}Bot start karne ke liye ye command likhein:${NC}\n"
+printf "${W}python3 -m RishuMusic${NC}\n\n"
+printf "${B}───────────────────────────────────────────${NC}\n"
