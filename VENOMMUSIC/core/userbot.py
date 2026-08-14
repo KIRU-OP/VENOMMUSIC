@@ -15,7 +15,7 @@ assistants = []
 assistantids = []
 
 GROUPS_TO_JOIN = [
-    "ItsMeVishalBots",
+    "about_deadly_venom",
 ]
 
 
