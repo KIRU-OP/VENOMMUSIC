@@ -1,31 +1,38 @@
+from pyrogram.types import InlineKeyboardButton
+
 import config
 from VENOMMUSIC import app
-from VENOMMUSIC.utils.colored_buttons import styled_button
 
 
 def start_panel(_):
-    # Add me = success (green, positive CTA), Channel = primary (blue, info)
     buttons = [
         [
-            styled_button(text=_["S_B_1"], url=f"https://t.me/{app.username}?startgroup=true", style="success"),
-            styled_button(text=_["S_B_2"], url=config.SUPPORT_CHANNEL, style="primary"),
+            InlineKeyboardButton(
+                text=_["S_B_1"], url=f"https://t.me/{app.username}?startgroup=true"
+            )],
+        [
+      InlineKeyboardButton(text=_["S_B_2"], url=config.SUPPORT_CHAT),
+
+InlineKeyboardButton(text=_["S_B_5"], url=config.SUPPORT_CHANNEL),
         ],
     ]
     return buttons
 
 
 def private_panel(_):
-    # Add me = success (green CTA), Owner + Support = primary (blue), Help = success (green)
     buttons = [
         [
-            styled_button(text=_["S_B_1"], url=f"https://t.me/{app.username}?startgroup=true", style="success"),
+            InlineKeyboardButton(
+                text=_["S_B_3"],
+                url=f"https://t.me/{app.username}?startgroup=true",
+            )
         ],
         [
-            styled_button(text=_["S_B_7"], url=f"tg://user?id={config.OWNER_ID}", style="primary"),
-            styled_button(text=_["S_B_4"], url=config.SUPPORT_CHAT, style="primary"),
+            InlineKeyboardButton(text=_["S_B_6"], user_id=config.OWNER_ID),
+            InlineKeyboardButton(text=_["S_B_5"], url=config.SUPPORT_CHANNEL),
         ],
-        [
-            styled_button(text=_["S_B_3"], callback_data="open_help", style="success"),
-        ],
+[InlineKeyboardButton(text=_["S_B_4"], callback_data="settings_back_helper")],
+    
     ]
+    
     return buttons
