@@ -1,3 +1,4 @@
+# ═══════════════════════════════════════════════
 import time
 from VENOMMUSIC.utils.formatters import time_to_seconds
 from VENOMMUSIC.utils.colored_buttons import styled_button
@@ -53,15 +54,15 @@ def control_buttons(_, chat_id):
 
 
 def autoplay_button(chat_id: int, status: bool) -> dict:
-    """Autoplay toggle - green when ON, red when OFF."""
+    """Autoplay toggle - green when ON, red when OFF. Short label = normal size."""
     if status:
         return styled_button(
-            "🔁 ᴀᴜᴛᴏᴘʟᴀʏ : ᴏɴ ✅",
+            "🔁 ᴏɴ",
             callback_data=f"AUTOPLAY_TOGGLE {chat_id}",
             style="success",
         )
     return styled_button(
-        "🔁 ᴀᴜᴛᴏᴘʟᴀʏ : ᴏғғ ❌",
+        "🔁 ᴏғғ",
         callback_data=f"AUTOPLAY_TOGGLE {chat_id}",
         style="danger",
     )
@@ -72,9 +73,12 @@ def autoplay_row(chat_id: int, status: bool, song_name: str = "") -> list:
     Autoplay row that shows the current song name AND a direct
     'cancel/off' option, not just a toggle.
 
+    Short labels + 3 buttons per row (instead of 1-2) keep each
+    button at normal size instead of stretching full width.
+
     Row layout:
-      [ 🎵 Song Name (info-only) ]                     <- only if song_name given
-      [ 🔁 Autoplay ON/OFF (toggle) ] [ ✖ Cancel ]      <- cancel only shows when ON
+      [ 🎵 Song Name (info-only) ]                          <- only if song_name given
+      [ 🔁 ON/OFF ] [ ✖ Cancel ] [ ✖ Close ]                 <- 3-wide, normal size
     """
     rows = []
 
@@ -94,7 +98,7 @@ def autoplay_row(chat_id: int, status: bool, song_name: str = "") -> list:
     if status:
         toggle_row.append(
             styled_button(
-                "✖ ᴀᴜᴛᴏᴘʟᴀʏ ᴄᴀɴᴄᴇʟ",
+                "✖ ᴄᴀɴᴄᴇʟ",
                 callback_data=f"AUTOPLAY_OFF {chat_id}",
                 style="danger",
             )
@@ -226,11 +230,13 @@ def slider_markup(_, videoid, user_id, query, query_type, channel, fplay):
 
 def stream_markup(_, chat_id, autoplay_status: bool = False, song_name: str = ""):
     """Now Playing keyboard — colored, with song name + autoplay cancel."""
-    return (
-        control_buttons(_, chat_id)
-        + autoplay_row(chat_id, autoplay_status, song_name)
-        + [[styled_button(_["CLOSE_BUTTON"], callback_data="close", style="danger")]]
+    rows = control_buttons(_, chat_id) + autoplay_row(chat_id, autoplay_status, song_name)
+    # Put Close in the same row as the toggle/cancel buttons (3-wide) so none
+    # of them stretch to full width — keeps button size normal, not huge.
+    rows[-1].append(
+        styled_button(_["CLOSE_BUTTON"], callback_data="close", style="danger")
     )
+    return rows
 
 
 def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False, song_name: str = ""):
@@ -242,7 +248,7 @@ def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False, 
     duration_sec = time_to_seconds(dur)
     bar = generate_progress_bar(played_sec, duration_sec)
 
-    return (
+    rows = (
         [[styled_button(
             f"{played} {bar} {dur}",
             callback_data="GetTimer",
@@ -250,8 +256,13 @@ def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False, 
         )]]
         + control_buttons(_, chat_id)
         + autoplay_row(chat_id, autoplay_status, song_name)
-        + [[styled_button(_["CLOSE_BUTTON"], callback_data="close", style="danger")]]
     )
+    # Put Close in the same row as the toggle/cancel buttons (3-wide) so none
+    # of them stretch to full width — keeps button size normal, not huge.
+    rows[-1].append(
+        styled_button(_["CLOSE_BUTTON"], callback_data="close", style="danger")
+    )
+    return rows
 
 
 # Colored aliases (kept for callers already using the "colored_" name)
