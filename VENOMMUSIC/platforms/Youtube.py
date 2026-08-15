@@ -1,10 +1,3 @@
-# ═══════════════════════════════════════════════════════════
-#        😎  VISHAL MUSIC BOT  😎
-#   GitHub : github.com/ItsMeVishal0/VishalMusic
-#   Developer : @ItsMeVishalBots | Telegram
-#   Module : YouTube Search, Download & Streaming
-# ═══════════════════════════════════════════════════════════
-
 import asyncio
 import contextlib
 import json
@@ -22,17 +15,17 @@ from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from py_yt import VideosSearch
 
-from VENOMMUSIC.utils.cookie_handler import COOKIE_PATH
-from VENOMMUSIC.utils.database import is_on_off
-from VENOMMUSIC.utils.downloader import download_audio_concurrent, yt_dlp_download
-from VENOMMUSIC.utils.errors import capture_internal_err
-from VENOMMUSIC.utils.formatters import time_to_seconds
-from VENOMMUSIC.utils.tuning import (
+from VIPMUSIC.utils.cookie_handler import COOKIE_PATH
+from VIPMUSIC.utils.database import is_on_off
+from VIPMUSIC.utils.downloader import download_audio_concurrent, yt_dlp_download
+from VIPMUSIC.utils.errors import capture_internal_err
+from VIPMUSIC.utils.formatters import time_to_seconds
+from VIPMUSIC.utils.tuning import (
     YTDLP_TIMEOUT,
     YOUTUBE_META_MAX,
     YOUTUBE_META_TTL,
 )
-from VENOMMUSIC import LOGGER
+from VIPMUSIC import LOGGER
 
 _module_logger = LOGGER(__name__)
 
@@ -57,6 +50,202 @@ FALLBACK_API_URL = "http://13.212.126.0:2020"
 # API URLs loaded status
 PRIMARY_API_LOADED = False
 FALLBACK_API_LOADED = False
+
+# ============ DOWNLOAD CACHE MANAGEMENT (prevents "No space left on device") ============
+# Root cause of the disk-full crashes: every downloaded file in downloads/ was
+# kept forever (used as a cache) with nothing ever deleting old entries.
+# This section adds automatic LRU + age based eviction so the disk never fills up.
+DOWNLOAD_CACHE_DIR = "downloads"
+MAX_CACHE_SIZE_MB = int(os.environ.get("MAX_CACHE_SIZE_MB", 2048))   # trim cache above this size
+MAX_CACHE_AGE_HOURS = int(os.environ.get("MAX_CACHE_AGE_HOURS", 6))  # delete anything older than this
+MIN_FREE_DISK_MB = int(os.environ.get("MIN_FREE_DISK_MB", 500))      # panic threshold -> aggressive cleanup
+CACHE_CLEANUP_INTERVAL_SEC = int(os.environ.get("CACHE_CLEANUP_INTERVAL_SEC", 600))  # background sweep every 10 min
+
+_cache_cleanup_lock = asyncio.Lock()
+
+
+def _dir_size_and_files(path: str) -> Tuple[int, List[Tuple[str, float, int]]]:
+    """Returns (total_size_bytes, [(filepath, mtime, size_bytes), ...]) for a directory."""
+    total = 0
+    files: List[Tuple[str, float, int]] = []
+    try:
+        for entry in os.scandir(path):
+            if entry.is_file():
+                try:
+                    st = entry.stat()
+                    files.append((entry.path, st.st_mtime, st.st_size))
+                    total += st.st_size
+                except OSError:
+                    continue
+    except FileNotFoundError:
+        pass
+    return total, files
+
+
+def _cleanup_downloads_sync(aggressive: bool = False) -> None:
+    """
+    Blocking cleanup of the downloads/ cache. Always run via cleanup_downloads()
+    (thread executor) so it never blocks the event loop.
+      1. Deletes anything older than MAX_CACHE_AGE_HOURS.
+      2. If still over MAX_CACHE_SIZE_MB (or `aggressive`, e.g. disk almost full),
+         deletes oldest files first (LRU) until back under the target size.
+    """
+    os.makedirs(DOWNLOAD_CACHE_DIR, exist_ok=True)
+    now = time.time()
+    max_age_sec = MAX_CACHE_AGE_HOURS * 3600
+    total, files = _dir_size_and_files(DOWNLOAD_CACHE_DIR)
+
+    kept: List[Tuple[str, float, int]] = []
+    for path, mtime, size in files:
+        if now - mtime > max_age_sec:
+            with contextlib.suppress(OSError):
+                os.remove(path)
+                total -= size
+        else:
+            kept.append((path, mtime, size))
+
+    cap_bytes = MAX_CACHE_SIZE_MB * 1024 * 1024
+    target_bytes = cap_bytes // 2 if aggressive else cap_bytes
+    if total > target_bytes:
+        kept.sort(key=lambda x: x[1])  # oldest (LRU) first
+        for path, mtime, size in kept:
+            if total <= target_bytes:
+                break
+            with contextlib.suppress(OSError):
+                os.remove(path)
+                total -= size
+
+    if aggressive:
+        _module_logger.warning(
+            f"⚠️ Low disk space — aggressively trimmed downloads/ cache (now ~{total // (1024 * 1024)} MB)"
+        )
+
+
+async def cleanup_downloads(aggressive: bool = False) -> None:
+    """Async-safe wrapper: runs the blocking cleanup in a thread executor."""
+    async with _cache_cleanup_lock:
+        await asyncio.get_event_loop().run_in_executor(None, _cleanup_downloads_sync, aggressive)
+
+
+_last_diag_log_time = 0.0
+_DIAG_LOG_COOLDOWN_SEC = 1800  # only log the full disk breakdown once per 30 min
+
+
+async def _ensure_disk_space() -> None:
+    """
+    Call this immediately before writing a new file to disk. If free space is
+    below MIN_FREE_DISK_MB, forces an aggressive cache trim first (both our
+    downloads/ cache and yt-dlp's own cache) so the write doesn't crash with
+    [Errno 28] No space left on device.
+
+    Also logs a full disk breakdown (total/used/free + biggest top-level dirs
+    on this filesystem), throttled to once per _DIAG_LOG_COOLDOWN_SEC, so the
+    cause is visible directly in the bot logs without needing separate SSH access.
+    """
+    global _last_diag_log_time
+    try:
+        usage = shutil.disk_usage(os.getcwd())
+        free_mb = usage.free / (1024 * 1024)
+        total_mb = usage.total / (1024 * 1024)
+        used_mb = usage.used / (1024 * 1024)
+    except OSError:
+        return
+    if free_mb < MIN_FREE_DISK_MB:
+        cache_mb_before, _ = _dir_size_and_files(DOWNLOAD_CACHE_DIR)
+        cache_mb_before = cache_mb_before / (1024 * 1024)
+        await cleanup_downloads(aggressive=True)
+        await _cleanup_ytdlp_cache()
+
+        now = time.time()
+        if now - _last_diag_log_time > _DIAG_LOG_COOLDOWN_SEC:
+            _last_diag_log_time = now
+            _module_logger.warning(
+                f"⚠️ DISK DIAGNOSTIC — total={total_mb:.0f}MB used={used_mb:.0f}MB free={free_mb:.0f}MB | "
+                f"downloads/ cache was {cache_mb_before:.0f}MB before trim | "
+                f"non-download usage on this disk ≈ {used_mb - cache_mb_before:.0f}MB "
+                f"(this is what's actually filling the disk — not the bot's download cache)"
+            )
+            await _log_top_disk_consumers()
+
+
+async def _log_top_disk_consumers() -> None:
+    """
+    Logs the top few largest top-level directories under the bot's working
+    directory tree, so the real disk hog shows up directly in bot logs
+    (useful when SSH access to run `du -sh` manually isn't convenient).
+    Runs in a thread executor so it never blocks the event loop; capped to
+    avoid slow scans on huge filesystems.
+    """
+    def _scan():
+        base = os.getcwd()
+        results = []
+        try:
+            with os.scandir(base) as it:
+                for entry in it:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            size = 0
+                            count = 0
+                            for root, dirs, files in os.walk(entry.path, followlinks=False):
+                                for f in files:
+                                    count += 1
+                                    if count > 20000:  # safety cap
+                                        raise StopIteration
+                                    try:
+                                        size += os.path.getsize(os.path.join(root, f))
+                                    except OSError:
+                                        continue
+                            results.append((entry.name, size))
+                        elif entry.is_file(follow_symlinks=False):
+                            try:
+                                results.append((entry.name, entry.stat().st_size))
+                            except OSError:
+                                continue
+                    except (StopIteration, OSError):
+                        continue
+        except OSError:
+            pass
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:8]
+
+    try:
+        top = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, _scan), timeout=20
+        )
+        if top:
+            breakdown = ", ".join(f"{name}={size / (1024 * 1024):.0f}MB" for name, size in top)
+            _module_logger.warning(f"⚠️ TOP DISK CONSUMERS (bot working dir): {breakdown}")
+    except Exception:
+        pass
+
+
+async def _cache_cleanup_loop():
+    """Background task: periodically trims downloads/ and yt-dlp's own cache so disk never fills up."""
+    while True:
+        try:
+            await cleanup_downloads(aggressive=False)
+            await _cleanup_ytdlp_cache()
+        except Exception as e:
+            _module_logger.warning(f"⚠️ Cache cleanup loop error: {e}")
+        await asyncio.sleep(CACHE_CLEANUP_INTERVAL_SEC)
+
+
+async def _cleanup_ytdlp_cache() -> None:
+    """
+    yt-dlp keeps its own cache (nsig/player responses etc.) outside downloads/,
+    usually under ~/.cache/yt-dlp. This is a separate disk hog from the download
+    cache and won't be touched by cleanup_downloads(), so it's purged here too.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "yt-dlp", "--rm-cache-dir",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(proc.communicate(), timeout=15)
+    except Exception:
+        pass
 
 # ============ RATE LIMITING (async â€” does NOT block the event loop) ============
 _request_timestamps = []
@@ -98,7 +287,7 @@ async def _get_yt_session() -> aiohttp.ClientSession:
 async def load_apis():
     """Load and verify APIs â€” only checks non-empty URLs."""
     global PRIMARY_API_LOADED, FALLBACK_API_LOADED
-    logger = LOGGER("VENOMMUSIC.platforms.Youtube.py")
+    logger = LOGGER("VISHALMUSIC.platforms.Youtube.py")
 
     if PRIMARY_API_URL:
         try:
@@ -124,13 +313,15 @@ async def load_apis():
 
     return PRIMARY_API_LOADED, FALLBACK_API_LOADED
 
-# Initialize APIs on startup
+# Initialize APIs + start background cache cleanup on startup
 try:
     loop = asyncio.get_event_loop()
     if loop.is_running():
         asyncio.create_task(load_apis())
+        asyncio.create_task(_cache_cleanup_loop())
     else:
         loop.run_until_complete(load_apis())
+        loop.create_task(_cache_cleanup_loop())
 except RuntimeError:
     pass
 
@@ -146,6 +337,27 @@ def _cookiefile_path() -> Optional[str]:
 def _cookies_args() -> List[str]:
     p = _cookiefile_path()
     return ["--cookies", p] if p else []
+
+def _bot_bypass_args() -> List[str]:
+    """
+    Extra yt-dlp args that reduce the frequency of YouTube's
+    'Sign in to confirm you're not a bot' block. This does NOT replace
+    cookies -- if there is no valid cookie file, YouTube can still reject
+    the request -- but the android/ios player clients are generally hit
+    less hard than the default web client, so this is a useful first line
+    of defense and a good fallback when cookies alone aren't enough.
+    """
+    return ["--extractor-args", "youtube:player_client=android,ios,web"]
+
+def _yt_dlp_cli_args() -> List[str]:
+    """Combined cookie + bot-bypass args shared by every yt-dlp subprocess call."""
+    return _cookies_args() + _bot_bypass_args()
+
+def _is_bot_check_error(text: str) -> bool:
+    if not text:
+        return False
+    t = text.lower()
+    return "sign in to confirm" in t or "not a bot" in t
 
 async def _exec_proc(*args: str) -> Tuple[bytes, bytes]:
     proc = await asyncio.create_subprocess_exec(
@@ -177,6 +389,7 @@ async def download_song_primary_api(link: str) -> str:
         return file_path
 
     try:
+        await _ensure_disk_space()
         session = await _get_yt_session()
         params = {"url": video_id, "type": "audio", "api_key": SHRUTI_API_KEY}
         async with session.get(
@@ -213,6 +426,7 @@ async def download_video_primary_api(link: str) -> str:
         return file_path
 
     try:
+        await _ensure_disk_space()
         session = await _get_yt_session()
         params = {"url": video_id, "type": "video", "api_key": SHRUTI_API_KEY}
         async with session.get(
@@ -249,6 +463,7 @@ async def download_song_fallback_api(link: str) -> str:
         return file_path
 
     try:
+        await _ensure_disk_space()
         session = await _get_yt_session()
         # Step 1: get token
         async with session.get(
@@ -295,6 +510,7 @@ async def download_video_fallback_api(link: str) -> str:
         return file_path
 
     try:
+        await _ensure_disk_space()
         session = await _get_yt_session()
         # Step 1: get token
         async with session.get(
@@ -342,11 +558,12 @@ async def download_video_ytdlp(link: str) -> str:
         return file_path
 
     await _check_rate_limit_async()
+    await _ensure_disk_space()
 
     try:
         ytdlp_opts = [
             "yt-dlp",
-            *(_cookies_args()),
+            *(_yt_dlp_cli_args()),
             "--no-warnings",
             "--geo-bypass",
             "--force-ipv4",
@@ -368,7 +585,7 @@ async def download_video_ytdlp(link: str) -> str:
                 try:
                     ytdlp_opts = [
                         "yt-dlp",
-                        *(_cookies_args()),
+                        *(_yt_dlp_cli_args()),
                         "--no-warnings",
                         "--geo-bypass",
                         "--force-ipv4",
@@ -409,11 +626,12 @@ async def download_audio_ytdlp(link: str) -> str:
         return file_path
 
     await _check_rate_limit_async()
-    
+    await _ensure_disk_space()
+
     try:
         ytdlp_opts = [
             "yt-dlp",
-            *(_cookies_args()),
+            *(_yt_dlp_cli_args()),
             "--no-warnings",
             "--geo-bypass",
             "--force-ipv4",
@@ -438,7 +656,7 @@ async def download_audio_ytdlp(link: str) -> str:
                     alt_file_path = os.path.join(DOWNLOAD_DIR, f"{video_id}.webm")
                     ytdlp_opts = [
                         "yt-dlp",
-                        *(_cookies_args()),
+                        *(_yt_dlp_cli_args()),
                         "--no-warnings",
                         "--geo-bypass",
                         "--force-ipv4",
@@ -635,7 +853,7 @@ class YouTubeAPI:
     async def is_live(self, link: str) -> bool:
         await _check_rate_limit_async()
         prepared = self._prepare_link(link)
-        stdout, _ = await _exec_proc("yt-dlp", *(_cookies_args()), "--dump-json", prepared)
+        stdout, _ = await _exec_proc("yt-dlp", *(_yt_dlp_cli_args()), "--dump-json", prepared)
         if not stdout:
             return False
         try:
@@ -686,7 +904,7 @@ class YouTubeAPI:
         await _check_rate_limit_async()
         
         ytdlp_args = [
-            "yt-dlp", *(_cookies_args()), "--no-warnings", "--geo-bypass", "--force-ipv4",
+            "yt-dlp", *(_yt_dlp_cli_args()), "--no-warnings", "--geo-bypass", "--force-ipv4",
             "-g", "-f", "best[height<=?720][width<=?1280]/best", link
         ]
         
@@ -700,6 +918,12 @@ class YouTubeAPI:
                 return (0, "Invalid stream URL")
         else:
             error_msg = stderr.decode() if stderr else "Unknown error"
+            if _is_bot_check_error(error_msg):
+                _module_logger.info(
+                    "❌ YouTube bot-check triggered — cookies are missing/expired. "
+                    "Export fresh cookies (yt-dlp --cookies-from-browser) and update COOKIE_PATH."
+                )
+                return (0, "YouTube requires sign-in (cookies missing/expired)")
             if "429" in error_msg or "Too Many Requests" in error_msg:
                 await asyncio.sleep(30)
                 return (0, "Rate limited")
@@ -711,7 +935,7 @@ class YouTubeAPI:
     async def _try_alternative_format(self, link: str) -> Tuple[int, str]:
         format_options = ["best[height<=480]", "best[ext=mp4]", "best", "worst"]
         for fmt in format_options:
-            stdout, stderr = await _exec_proc("yt-dlp", *(_cookies_args()), "--no-warnings", "-g", "-f", fmt, link)
+            stdout, stderr = await _exec_proc("yt-dlp", *(_yt_dlp_cli_args()), "--no-warnings", "-g", "-f", fmt, link)
             if stdout:
                 stream_url = stdout.decode().split("\n")[0]
                 if stream_url and stream_url.startswith('http'):
@@ -725,7 +949,8 @@ class YouTubeAPI:
             link = self.playlist_url + str(videoid)
         link = link.split("&")[0]
         await _check_rate_limit_async()
-        playlist = await shell_cmd(f"yt-dlp -i --get-id --flat-playlist --playlist-end {limit} --skip-download {link}")
+        extra = " ".join(_yt_dlp_cli_args())
+        playlist = await shell_cmd(f"yt-dlp -i --get-id --flat-playlist --playlist-end {limit} --skip-download {extra} {link}")
         try:
             items = [key for key in playlist.split("\n") if key]
         except:
@@ -741,7 +966,7 @@ class YouTubeAPI:
         except Exception:
             await _check_rate_limit_async()
             prepared = self._prepare_link(link, videoid)
-            stdout, _ = await _exec_proc("yt-dlp", *(_cookies_args()), "--dump-json", prepared)
+            stdout, _ = await _exec_proc("yt-dlp", *(_yt_dlp_cli_args()), "--dump-json", prepared)
             if not stdout:
                 raise ValueError("Track not found (yt-dlp fallback)")
             info = json.loads(stdout.decode())
@@ -775,7 +1000,10 @@ class YouTubeAPI:
 
         await _check_rate_limit_async()
         
-        opts = {"quiet": True}
+        opts = {
+            "quiet": True,
+            "extractor_args": {"youtube": {"player_client": ["android", "ios", "web"]}},
+        }
         cf = _cookiefile_path()
         if cf:
             opts["cookiefile"] = cf
