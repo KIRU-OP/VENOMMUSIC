@@ -15,17 +15,17 @@ from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from py_yt import VideosSearch
 
-from VIPMUSIC.utils.cookie_handler import COOKIE_PATH
-from VIPMUSIC.utils.database import is_on_off
-from VIPMUSIC.utils.downloader import download_audio_concurrent, yt_dlp_download
-from VIPMUSIC.utils.errors import capture_internal_err
-from VIPMUSIC.utils.formatters import time_to_seconds
-from VIPMUSIC.utils.tuning import (
+from VENOMMUSIC.utils.cookie_handler import COOKIE_PATH
+from VENOMMUSIC.utils.database import is_on_off
+from VENOMMUSIC.utils.downloader import download_audio_concurrent, yt_dlp_download
+from VENOMMUSIC.utils.errors import capture_internal_err
+from VENOMMUSIC.utils.formatters import time_to_seconds
+from VENOMMUSIC.utils.tuning import (
     YTDLP_TIMEOUT,
     YOUTUBE_META_MAX,
     YOUTUBE_META_TTL,
 )
-from VIPMUSIC import LOGGER
+from VENOMMUSIC import LOGGER
 
 _module_logger = LOGGER(__name__)
 
