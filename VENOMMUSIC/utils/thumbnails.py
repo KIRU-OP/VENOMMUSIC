@@ -163,7 +163,7 @@ def generate_vinylist_thumb(
     requested_by: str = "Someone",
     platform: str = "YouTube",
     quality: str = "128kbps",
-    brand: str = "Vishal",
+    brand: str = "Venom",
     brand2: str = "Music",
     progress: float = 0.35,
 ):
