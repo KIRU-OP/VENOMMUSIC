@@ -400,6 +400,53 @@ def generate_vinylist_thumb(
     return out_path
 
 
+def get_thumb(
+    album_art_path: str,
+    out_path: str = None,
+    **kwargs,
+):
+    """
+    Generate a Vinylist-style thumbnail and return the local file path.
+
+    kwargs are passed straight through to generate_vinylist_thumb
+    (title, artist, duration, elapsed, requested_by, platform,
+    quality, brand, brand2, progress).
+    """
+    if out_path is None:
+        os.makedirs("/tmp/thumbnails", exist_ok=True)
+        out_path = f"/tmp/thumbnails/{os.urandom(6).hex()}.jpg"
+
+    return generate_vinylist_thumb(
+        album_art_path=album_art_path,
+        out_path=out_path,
+        **kwargs,
+    )
+
+
+def get_thumb_url(
+    album_art_path: str,
+    out_path: str = None,
+    **kwargs,
+):
+    """
+    Generate a Vinylist-style thumbnail and return something usable as a
+    'url' by the caller (currently just the local file path, since
+    Telegram/pyrogram can send a local path directly as a photo).
+
+    If your bot actually needs a real HTTP URL (e.g. it uploads to a
+    CDN/imgbb/telegra.ph), plug that upload call in below and return
+    the resulting link instead of `path`.
+    """
+    path = get_thumb(album_art_path, out_path=out_path, **kwargs)
+
+    # TODO: if call.py expects a real http(s) URL, upload `path` here
+    # and return that URL instead, e.g.:
+    # url = upload_to_your_host(path)
+    # return url
+
+    return path
+
+
 if __name__ == "__main__":
     generate_vinylist_thumb(
         album_art_path="/home/claude/work/yt_thumb_test.jpg",
