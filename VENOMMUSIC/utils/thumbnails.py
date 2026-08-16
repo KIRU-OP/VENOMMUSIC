@@ -1,8 +1,15 @@
 import os
+import re
 import math
 import random
 import textwrap
+import aiohttp
+import aiofiles
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from youtubesearchpython.__future__ import VideosSearch
+
+CACHE_DIR = "cache"
+YOUTUBE_IMG_URL = "https://telegra.ph/file/59f0d90ab8effa96b13a4.jpg"
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 
@@ -400,48 +407,121 @@ def generate_vinylist_thumb(
     return out_path
 
 
-def get_thumb(
-    album_art_path: str,
-    out_path: str = None,
-    **kwargs,
-):
-    """
-    Generate a Vinylist-style thumbnail and return the local file path.
+async def _fetch_video_details(videoid: str):
+    """Look up title/duration/channel/thumbnail-url for a YouTube video id."""
+    url = f"https://www.youtube.com/watch?v={videoid}"
+    results = VideosSearch(url, limit=1)
+    data = await results.next()
+    result = data["result"][0]
 
-    kwargs are passed straight through to generate_vinylist_thumb
-    (title, artist, duration, elapsed, requested_by, platform,
-    quality, brand, brand2, progress).
-    """
-    if out_path is None:
-        os.makedirs("/tmp/thumbnails", exist_ok=True)
-        out_path = f"/tmp/thumbnails/{os.urandom(6).hex()}.jpg"
+    title = re.sub(r"\W+", " ", result.get("title") or "Unknown Track").title()
+    duration = result.get("duration") or "Live"
+    channel = (result.get("channel") or {}).get("name") or "Unknown Artist"
+    thumbnails = result.get("thumbnails") or []
+    thumb_url = thumbnails[0]["url"].split("?")[0] if thumbnails else None
 
-    return generate_vinylist_thumb(
-        album_art_path=album_art_path,
-        out_path=out_path,
-        **kwargs,
+    return {
+        "title": title,
+        "duration": duration,
+        "artist": channel,
+        "thumb_url": thumb_url,
+    }
+
+
+async def _download_raw_thumb(videoid: str, thumb_url: str) -> str:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    raw_path = os.path.join(CACHE_DIR, f"raw_{videoid}.jpg")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(thumb_url) as resp:
+            if resp.status == 200:
+                async with aiofiles.open(raw_path, mode="wb") as f:
+                    await f.write(await resp.read())
+
+    return raw_path
+
+
+async def get_thumb(videoid: str, **kwargs) -> str:
+    """
+    Build (and cache) a Vinylist-style Now-Playing thumbnail for a
+    YouTube video id.
+
+    Extra kwargs (elapsed, requested_by, platform, quality, progress,
+    brand, brand2) are optional and override the defaults if your
+    caller passes them.
+    """
+    final_path = os.path.join(CACHE_DIR, f"{videoid}_vinyl.png")
+    if os.path.isfile(final_path):
+        return final_path
+
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+    try:
+        details = await _fetch_video_details(videoid)
+    except Exception:
+        details = {
+            "title": "Unknown Track",
+            "duration": "Live",
+            "artist": "Unknown Artist",
+            "thumb_url": None,
+        }
+
+    raw_path = None
+    if details["thumb_url"]:
+        try:
+            raw_path = await _download_raw_thumb(videoid, details["thumb_url"])
+        except Exception:
+            raw_path = None
+
+    if not raw_path or not os.path.isfile(raw_path):
+        raw_path = await _download_raw_thumb(
+            videoid, f"https://i.ytimg.com/vi/{videoid}/hqdefault.jpg"
+        )
+
+    params = dict(
+        title=details["title"],
+        artist=details["artist"],
+        duration=details["duration"],
+        elapsed=kwargs.get("elapsed", "0:00"),
+        requested_by=kwargs.get("requested_by", "Someone"),
+        platform=kwargs.get("platform", "YouTube"),
+        quality=kwargs.get("quality", "128kbps"),
+        brand=kwargs.get("brand", "Vishal"),
+        brand2=kwargs.get("brand2", "Music"),
+        progress=kwargs.get("progress", 0.0),
     )
 
+    try:
+        generate_vinylist_thumb(
+            album_art_path=raw_path,
+            out_path=final_path,
+            **params,
+        )
+    finally:
+        if raw_path and os.path.isfile(raw_path):
+            try:
+                os.remove(raw_path)
+            except OSError:
+                pass
 
-def get_thumb_url(
-    album_art_path: str,
-    out_path: str = None,
-    **kwargs,
-):
+    return final_path
+
+
+async def get_thumb_url(videoid: str, **kwargs) -> str:
     """
-    Generate a Vinylist-style thumbnail and return something usable as a
-    'url' by the caller (currently just the local file path, since
-    Telegram/pyrogram can send a local path directly as a photo).
+    Same as get_thumb, but intended for callers that just want a
+    ready-to-send image reference. Currently returns the local file
+    path (Telegram/pyrogram accept a local path directly as a photo).
 
-    If your bot actually needs a real HTTP URL (e.g. it uploads to a
-    CDN/imgbb/telegra.ph), plug that upload call in below and return
-    the resulting link instead of `path`.
+    If you actually need a public http(s) URL (e.g. for an inline
+    query), upload the generated file to your CDN/telegra.ph here and
+    return that URL instead.
     """
-    path = get_thumb(album_art_path, out_path=out_path, **kwargs)
+    path = await get_thumb(videoid, **kwargs)
 
-    # TODO: if call.py expects a real http(s) URL, upload `path` here
-    # and return that URL instead, e.g.:
-    # url = upload_to_your_host(path)
+    # TODO: if this needs to be a real http(s) URL somewhere in your
+    # bot, upload `path` and return the resulting link instead:
+    # url = await upload_to_your_host(path)
     # return url
 
     return path
