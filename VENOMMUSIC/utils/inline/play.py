@@ -43,13 +43,42 @@ def generate_progress_bar(played_sec, duration_sec):
 # ═══════════════════════════════════════════════════════════
 
 def control_buttons(_, chat_id):
-    """Playback control row with colors."""
+    """Playback control row with colors — matches screenshot layout:
+    ▷ (green) II (green) ↻ (red) ▶▶| (green) ▢ (blue)
+    """
     return [[
         styled_button("▷", callback_data=f"ADMIN Resume|{chat_id}", style="success"),
-        styled_button("II", callback_data=f"ADMIN Pause|{chat_id}", style="primary"),
-        styled_button("↻", callback_data=f"ADMIN Replay|{chat_id}", style="primary"),
-        styled_button("‣‣I", callback_data=f"ADMIN Skip|{chat_id}", style="primary"),
-        styled_button("▢", callback_data=f"ADMIN Stop|{chat_id}", style="danger"),
+        styled_button("II", callback_data=f"ADMIN Pause|{chat_id}", style="success"),
+        styled_button("↻", callback_data=f"ADMIN Replay|{chat_id}", style="danger"),
+        styled_button("‣‣I", callback_data=f"ADMIN Skip|{chat_id}", style="success"),
+        styled_button("▢", callback_data=f"ADMIN Stop|{chat_id}", style="primary"),
+    ]]
+
+
+def seek_buttons(chat_id, seconds: int = 15):
+    """Seek row — matches screenshot: -15s (blue) | 15s+ (green)."""
+    return [[
+        styled_button(
+            f"-{seconds}ˢ",
+            callback_data=f"ADMIN SeekBack|{chat_id}|{seconds}",
+            style="primary",
+        ),
+        styled_button(
+            f"{seconds}ˢ+",
+            callback_data=f"ADMIN SeekForward|{chat_id}|{seconds}",
+            style="success",
+        ),
+    ]]
+
+
+def thumbnail_button(chat_id: int, status: bool = True) -> list:
+    """Full-width thumbnail toggle row — matches screenshot green button."""
+    return [[
+        styled_button(
+            "▭ ᴛʜᴜᴍʙɴᴀɪʟ",
+            callback_data=f"THUMBNAIL_TOGGLE {chat_id}",
+            style="success" if status else "danger",
+        )
     ]]
 
 
@@ -57,12 +86,12 @@ def autoplay_button(chat_id: int, status: bool) -> dict:
     """Autoplay toggle - green when ON, red when OFF. Short label = normal size."""
     if status:
         return styled_button(
-            "🔁 ᴏɴ",
+            "🎵 ᴀᴜᴛᴏᴘʟᴀʏ",
             callback_data=f"AUTOPLAY_TOGGLE {chat_id}",
             style="success",
         )
     return styled_button(
-        "🔁 ᴏғғ",
+        "🎵 ᴀᴜᴛᴏᴘʟᴀʏ",
         callback_data=f"AUTOPLAY_TOGGLE {chat_id}",
         style="danger",
     )
@@ -70,15 +99,15 @@ def autoplay_button(chat_id: int, status: bool) -> dict:
 
 def autoplay_row(chat_id: int, status: bool, song_name: str = "") -> list:
     """
-    Autoplay row that shows the current song name AND a direct
-    'cancel/off' option, not just a toggle.
-
-    Short labels + 3 buttons per row (instead of 1-2) keep each
-    button at normal size instead of stretching full width.
+    Autoplay row — matches screenshot: full-width single button
+    (🎵 AUTOPLAY, red when off / green when on), with an optional
+    song-name info row above it, and an optional explicit cancel
+    row when autoplay is currently ON.
 
     Row layout:
-      [ 🎵 Song Name (info-only) ]                          <- only if song_name given
-      [ 🔁 ON/OFF ] [ ✖ Cancel ] [ ✖ Close ]                 <- 3-wide, normal size
+      [ 🎵 Song Name (info-only) ]   <- only if song_name given
+      [ 🔁 ᴀᴜᴛᴏᴘʟᴀʏ ]                <- full width
+      [ ✖ ᴄᴀɴᴄᴇʟ ]                   <- only if status is ON
     """
     rows = []
 
@@ -92,19 +121,18 @@ def autoplay_row(chat_id: int, status: bool, song_name: str = "") -> list:
             )
         ])
 
-    toggle_row = [autoplay_button(chat_id, status)]
+    rows.append([autoplay_button(chat_id, status)])
 
-    # Explicit "cancel" button only makes sense when autoplay is currently ON
+    # Explicit "cancel" row only makes sense when autoplay is currently ON
     if status:
-        toggle_row.append(
+        rows.append([
             styled_button(
                 "✖ ᴄᴀɴᴄᴇʟ",
                 callback_data=f"AUTOPLAY_OFF {chat_id}",
                 style="danger",
             )
-        )
+        ])
 
-    rows.append(toggle_row)
     return rows
 
 
@@ -228,19 +256,29 @@ def slider_markup(_, videoid, user_id, query, query_type, channel, fplay):
 #   STREAM ("NOW PLAYING") BUTTONS  (colored)
 # ═══════════════════════════════════════════════════════════
 
-def stream_markup(_, chat_id, autoplay_status: bool = False, song_name: str = ""):
-    """Now Playing keyboard — colored, with song name + autoplay cancel."""
-    rows = control_buttons(_, chat_id) + autoplay_row(chat_id, autoplay_status, song_name)
-    # Put Close in the same row as the toggle/cancel buttons (3-wide) so none
-    # of them stretch to full width — keeps button size normal, not huge.
-    rows[-1].append(
-        styled_button(_["CLOSE_BUTTON"], callback_data="close", style="danger")
+def stream_markup(_, chat_id, autoplay_status: bool = False, song_name: str = "",
+                   thumbnail_status: bool = True):
+    """Now Playing keyboard — matches screenshot layout:
+
+      [ ▷ ][ II ][ ↻ ][ ▶▶| ][ ▢ ]     <- controls
+      [ -15ˢ ][ 15ˢ+ ]                  <- seek
+      [ 🎵 ᴀᴜᴛᴏᴘʟᴀʏ ]                    <- full width
+      [ ▭ ᴛʜᴜᴍʙɴᴀɪʟ ]                   <- full width
+      [ CLOSE ]                         <- full width
+    """
+    rows = (
+        control_buttons(_, chat_id)
+        + seek_buttons(chat_id)
+        + autoplay_row(chat_id, autoplay_status, song_name)
+        + thumbnail_button(chat_id, thumbnail_status)
+        + [[styled_button(_["CLOSE_BUTTON"], callback_data="close", style="success")]]
     )
     return rows
 
 
-def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False, song_name: str = ""):
-    """Now Playing keyboard with progress bar — colored (throttled)."""
+def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False,
+                         song_name: str = "", thumbnail_status: bool = True):
+    """Now Playing keyboard with progress bar — colored (throttled), matches screenshot."""
     if not should_update_progress(chat_id):
         return None
 
@@ -252,15 +290,13 @@ def stream_markup_timer(_, chat_id, played, dur, autoplay_status: bool = False, 
         [[styled_button(
             f"{played} {bar} {dur}",
             callback_data="GetTimer",
-            style="primary",
+            style="success",
         )]]
         + control_buttons(_, chat_id)
+        + seek_buttons(chat_id)
         + autoplay_row(chat_id, autoplay_status, song_name)
-    )
-    # Put Close in the same row as the toggle/cancel buttons (3-wide) so none
-    # of them stretch to full width — keeps button size normal, not huge.
-    rows[-1].append(
-        styled_button(_["CLOSE_BUTTON"], callback_data="close", style="danger")
+        + thumbnail_button(chat_id, thumbnail_status)
+        + [[styled_button(_["CLOSE_BUTTON"], callback_data="close", style="success")]]
     )
     return rows
 
