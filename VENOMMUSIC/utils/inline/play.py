@@ -82,56 +82,49 @@ def thumbnail_button(chat_id: int, status: bool = True) -> list:
     ]]
 
 
-def autoplay_button(chat_id: int, status: bool) -> dict:
-    """Autoplay toggle - green when ON, red when OFF. Short label = normal size."""
-    if status:
-        return styled_button(
-            "🎵 ᴀᴜᴛᴏᴘʟᴀʏ",
-            callback_data=f"AUTOPLAY_TOGGLE {chat_id}",
-            style="success",
-        )
+def autoplay_button(chat_id: int, status: bool, song_name: str = "") -> dict:
+    """Autoplay toggle button — text itself shows the song name when
+    autoplay is ON, e.g. '🎵 Gulzaar Chhaniwala: Utt' — green when ON,
+    red when OFF (matches screenshot: full width, colored by state).
+    """
+    if status and song_name:
+        short_name = (song_name[:26] + "…") if len(song_name) > 26 else song_name
+        label = f"🎵 {short_name}"
+    elif status:
+        label = "🎵 ᴀᴜᴛᴏᴘʟᴀʏ ᴏɴ"
+    else:
+        label = "🎵 ᴀᴜᴛᴏᴘʟᴀʏ"
+
     return styled_button(
-        "🎵 ᴀᴜᴛᴏᴘʟᴀʏ",
+        label,
         callback_data=f"AUTOPLAY_TOGGLE {chat_id}",
-        style="danger",
+        style="success" if status else "danger",
     )
 
 
 def autoplay_row(chat_id: int, status: bool, song_name: str = "") -> list:
     """
-    Autoplay row — matches screenshot: full-width single button
-    (🎵 AUTOPLAY, red when off / green when on), with an optional
-    song-name info row above it, and an optional explicit cancel
-    row when autoplay is currently ON.
+    Autoplay row — matches screenshot: full-width single button whose
+    label itself shows the currently playing song when autoplay is ON.
 
     Row layout:
-      [ 🎵 Song Name (info-only) ]   <- only if song_name given
-      [ 🔁 ᴀᴜᴛᴏᴘʟᴀʏ ]                <- full width
-      [ ✖ ᴄᴀɴᴄᴇʟ ]                   <- only if status is ON
+      [ 🎵 Song Name  /  🎵 ᴀᴜᴛᴏᴘʟᴀʏ ]   <- full width toggle, tap = flip state
+      [ ✔ ᴏɴ ][ ✖ ᴏꜰꜰ ]                <- explicit select (pick state directly)
     """
-    rows = []
+    rows = [[autoplay_button(chat_id, status, song_name)]]
 
-    if song_name:
-        short_name = (song_name[:28] + "…") if len(song_name) > 28 else song_name
-        rows.append([
-            styled_button(
-                f"🎵 {short_name}",
-                callback_data="GetTimer",  # info-only, harmless no-op callback
-                style="secondary",
-            )
-        ])
-
-    rows.append([autoplay_button(chat_id, status)])
-
-    # Explicit "cancel" row only makes sense when autoplay is currently ON
-    if status:
-        rows.append([
-            styled_button(
-                "✖ ᴄᴀɴᴄᴇʟ",
-                callback_data=f"AUTOPLAY_OFF {chat_id}",
-                style="danger",
-            )
-        ])
+    rows.append([
+        styled_button(
+            "✔ ᴏɴ",
+            callback_data=f"AUTOPLAY_ON {chat_id}",
+            style="success",
+        ),
+        styled_button(
+            "✖ ᴏꜰꜰ",
+            callback_data=f"AUTOPLAY_OFF {chat_id}",
+            style="danger",
+        ),
+    ])
 
     return rows
 
